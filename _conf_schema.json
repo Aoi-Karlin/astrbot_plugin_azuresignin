@@ -1,0 +1,162 @@
+{
+  "render": {
+    "description": "卡片渲染",
+    "type": "object",
+    "items": {
+      "background_file": {
+        "description": "底部背景图（可上传多张，随机使用第一张可用的）",
+        "type": "file",
+        "default": [],
+        "file_types": ["jpg", "jpeg", "png", "webp", "gif", "bmp"],
+        "obvious_hint": true,
+        "hint": "卡片的底图。留空时使用 background_url，再留空则使用内置渐变背景。图片会被压缩后内嵌进渲染页面。"
+      },
+      "background_url": {
+        "description": "背景图直链",
+        "type": "string",
+        "default": "",
+        "hint": "未上传背景图时使用。支持 http(s) 链接，也支持填 data/plugin_data/astrbot_plugin_azuresignin 下的相对路径。"
+      },
+      "text_side": {
+        "description": "文案位置",
+        "type": "string",
+        "default": "right",
+        "options": ["left", "right"],
+        "labels": ["左侧", "右侧"],
+        "subtitles": ["文字面板靠左，右侧露出底图", "文字面板靠右，左侧露出底图"]
+      },
+      "card_width": {
+        "description": "卡片宽度",
+        "type": "int",
+        "default": 1000,
+        "slider": { "min": 480, "max": 2000, "step": 20 },
+        "hint": "导出图片的宽度（像素）。版面按宽度等比缩放。"
+      },
+      "card_height": {
+        "description": "卡片高度",
+        "type": "int",
+        "default": 1400,
+        "slider": { "min": 640, "max": 2800, "step": 20 },
+        "hint": "导出图片的高度（像素）。"
+      },
+      "image_format": {
+        "description": "输出格式",
+        "type": "string",
+        "default": "jpeg",
+        "options": ["jpeg", "png"],
+        "labels": ["JPEG（体积小）", "PNG（无损）"]
+      },
+      "scrim_opacity": {
+        "description": "暗角压暗强度",
+        "type": "float",
+        "default": 0.55,
+        "slider": { "min": 0, "max": 1, "step": 0.05 },
+        "hint": "文字一侧的渐变压暗层强度，用于在亮色底图上保证文字可读。"
+      },
+      "kicker_text": {
+        "description": "卡片顶部小标题",
+        "type": "string",
+        "default": "DAILY CHECK-IN"
+      },
+      "footer_text": {
+        "description": "卡片底部寄语",
+        "type": "string",
+        "default": "愿每一次坚持，都被看见。"
+      },
+      "glass_enabled": {
+        "description": "启用 LiquidGlass 液态玻璃",
+        "type": "bool",
+        "default": true,
+        "hint": "通过 WebView(Chromium) 的 WebGL 渲染文字面板的液态玻璃折射/高光，来源 https://github.com/ybouane/liquidglass 。关闭或加载失败时使用 CSS 毛玻璃，卡片照常出图。"
+      },
+      "glass_cdn": {
+        "description": "LiquidGlass 脚本地址",
+        "type": "string",
+        "default": "",
+        "hint": "留空使用官方 CDN。若服务器在国内访问 jsDelivr 较慢，可替换为镜像地址，例如 https://fastly.jsdelivr.net/npm/@ybouane/liquidglass@1/dist/index.js"
+      },
+      "glass_blur": {
+        "description": "玻璃模糊",
+        "type": "float",
+        "default": 0.55,
+        "slider": { "min": 0, "max": 1, "step": 0.01 },
+        "hint": "调大更朦胧、文字更清晰；调小折射更清晰但底图容易干扰阅读。"
+      },
+      "glass_refraction": {
+        "description": "玻璃折射",
+        "type": "float",
+        "default": 0.62,
+        "slider": { "min": 0, "max": 1.5, "step": 0.01 }
+      },
+      "glass_tint": {
+        "description": "玻璃冷色调",
+        "type": "float",
+        "default": 0.42,
+        "slider": { "min": 0, "max": 1, "step": 0.01 }
+      },
+      "glass_brightness": {
+        "description": "玻璃亮度",
+        "type": "float",
+        "default": -0.28,
+        "slider": { "min": -0.6, "max": 0.4, "step": 0.01 },
+        "hint": "负值压暗，保证白色文字在亮底图上依然可读。"
+      },
+      "glass_saturation": {
+        "description": "玻璃饱和度",
+        "type": "float",
+        "default": -0.30,
+        "slider": { "min": -1, "max": 1, "step": 0.01 }
+      },
+      "glass_radius": {
+        "description": "玻璃圆角",
+        "type": "int",
+        "default": 52,
+        "slider": { "min": 0, "max": 160, "step": 2 }
+      },
+      "glass_shadow": {
+        "description": "玻璃投影强度",
+        "type": "float",
+        "default": 0.34,
+        "slider": { "min": 0, "max": 1, "step": 0.01 }
+      }
+    }
+  },
+  "signin": {
+    "description": "打卡规则",
+    "type": "object",
+    "items": {
+      "points_per_sign_in": {
+        "description": "每次打卡基础积分",
+        "type": "int",
+        "default": 10,
+        "slider": { "min": 0, "max": 500, "step": 1 }
+      },
+      "streak_bonus": {
+        "description": "连续打卡每日递增积分",
+        "type": "int",
+        "default": 2,
+        "slider": { "min": 0, "max": 100, "step": 1 },
+        "hint": "实际获得 = 基础积分 + 递增积分 × min(连续天数 - 1, 递增上限)。"
+      },
+      "max_streak_bonus": {
+        "description": "连续递增上限",
+        "type": "int",
+        "default": 5,
+        "slider": { "min": 0, "max": 60, "step": 1 }
+      },
+      "reset_hour": {
+        "description": "每日重置时间（0-23 点）",
+        "type": "int",
+        "default": 0,
+        "slider": { "min": 0, "max": 23, "step": 1 },
+        "hint": "凌晨未过此小时仍算作前一天，方便熬夜打卡。例如填 4，则 03:59 仍算昨天。"
+      },
+      "leaderboard_size": {
+        "description": "排行榜显示人数",
+        "type": "int",
+        "default": 10,
+        "slider": { "min": 1, "max": 50, "step": 1 }
+      }
+    }
+  }
+}
