@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>每日打卡</title>
+
+  <!-- Noto Sans SC。统一走 jsDelivr 的 Fontsource 分片文件：
+       国内可直连，且按 unicode-range 分片，只需拉取用到的几十个字形。 -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5/400.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5/500.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5/700.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/noto-sans-sc@5/900.css">
+
+  <style>
+    :root {
+      --s: {{ scale }};
+      --ink: #f5f8ff;
+      --ink-soft: rgba(245, 248, 255, 0.72);
+      --ink-faint: rgba(245, 248, 255, 0.48);
+      --accent: #7fd0ff;
+      --accent-2: #b9a7ff;
+      --line: rgba(255, 255, 255, 0.16);
+      --aurora:
+        radial-gradient(90% 60% at 12% 8%, rgba(120, 205, 255, 0.55) 0%, rgba(120, 205, 255, 0) 62%),
+        radial-gradient(80% 55% at 88% 18%, rgba(160, 140, 255, 0.45) 0%, rgba(160, 140, 255, 0) 60%),
+        radial-gradient(85% 60% at 78% 92%, rgba(255, 150, 190, 0.35) 0%, rgba(255, 150, 190, 0) 62%),
+        radial-gradient(70% 50% at 20% 78%, rgba(90, 235, 210, 0.30) 0%, rgba(90, 235, 210, 0) 60%),
+        linear-gradient(155deg, #0d1b30 0%, #08101c 55%, #05070c 100%);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #070a10;
+      font-family: "Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: geometricPrecision;
+    }
+
+    #root {
+      position: relative;
+      width: {{ card_w }}px;
+      height: {{ card_h }}px;
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+      background: #0a0f18;
+      isolation: isolate;
+    }
+
+    #root[data-side="right"] { justify-content: flex-end; }
+    #root[data-side="left"] { justify-content: flex-start; }
+
+    /* ---------- 底图 ---------- */
+    .bg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center;
+      z-index: 0;
+    }
+
+    .bg--gradient {
+      background: var(--aurora);
+    }
+
+    /* ---------- 压暗层 ---------- */
+    .scrim {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    .scrim[data-side="right"] {
+      background:
+        linear-gradient(270deg, rgba(4, 7, 13, 0.9) 0%, rgba(4, 7, 13, 0.55) 38%, rgba(4, 7, 13, 0.08) 72%, rgba(4, 7, 13, 0.22) 100%),
+        linear-gradient(0deg, rgba(4, 7, 13, 0.55) 0%, rgba(4, 7, 13, 0) 45%);
+    }
+
+    .scrim[data-side="left"] {
+      background:
+        linear-gradient(90deg, rgba(4, 7, 13, 0.9) 0%, rgba(4, 7, 13, 0.55) 38%, rgba(4, 7, 13, 0.08) 72%, rgba(4, 7, 13, 0.22) 100%),
+        linear-gradient(0deg, rgba(4, 7, 13, 0.55) 0%, rgba(4, 7, 13, 0) 45%);
+    }
+
+    /* ---------- 玻璃面板 ---------- */
+    #glass {
+      position: relative;
+      z-index: 2;
+      width: calc(100% * 0.48);
+      margin: 0 calc(56px * var(--s));
+      padding: calc(52px * var(--s)) calc(46px * var(--s));
+      border-radius: calc(52px * var(--s));
+      color: var(--ink);
+      /* CSS 毛玻璃：LiquidGlass(WebGL) 不可用或尚未完成时，卡片依然成立 */
+      background:
+        linear-gradient(155deg, rgba(255, 255, 255, 0.20) 0%, rgba(255, 255, 255, 0.06) 46%, rgba(255, 255, 255, 0.12) 100%);
+      -webkit-backdrop-filter: blur(26px) saturate(1.6) brightness(0.98);
+      backdrop-filter: blur(26px) saturate(1.6) brightness(0.98);
+      border: 1px solid rgba(255, 255, 255, 0.26);
+      box-shadow:
+        0 calc(28px * var(--s)) calc(70px * var(--s)) rgba(0, 0, 0, 0.46),
+        inset 0 1px 0 rgba(255, 255, 255, 0.46),
+        inset 0 -1px 0 rgba(255, 255, 255, 0.10);
+    }
+
+    /* LiquidGlass 注入的 canvas 默认 z-index:-1，也就是被 #glass 的 CSS 玻璃盖住。
+       只有确认 shader 已经拿到底图、并且画出稳定帧之后，才加 .is-liquid：
+       此时抬升 canvas 并撤掉 CSS 玻璃，完成一次干净的交接。
+       这样截图永远落在"要么 CSS 玻璃、要么真玻璃"上，不会拍到空白帧。 */
+    #glass.is-liquid {
+      background: transparent;
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+      border-color: transparent;
+      box-shadow: none;
+    }
+
+    #glass.is-liquid > canvas { z-index: 2 !important; }
+    #glass.is-liquid::before { display: none; }
+
+    .panel-inner { position: relative; z-index: 3; }
+
+    .kicker {
+      display: flex;
+      align-items: center;
+      gap: calc(12px * var(--s));
+      font-size: calc(14px * var(--s));
+      font-weight: 700;
+      letter-spacing: calc(4px * var(--s));
+      color: var(--accent);
+      text-transform: uppercase;
+    }
+
+    .kicker::before {
+      content: "";
+      width: calc(28px * var(--s));
+      height: 2px;
+      border-radius: 2px;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      box-shadow: 0 0 calc(12px * var(--s)) rgba(127, 208, 255, 0.85);
+    }
+
+    .date {
+      margin-top: calc(22px * var(--s));
+      font-size: calc(17px * var(--s));
+      font-weight: 400;
+      letter-spacing: calc(1px * var(--s));
+      color: var(--ink-faint);
+    }
+
+    .name {
+      margin-top: calc(10px * var(--s));
+      font-size: calc(34px * var(--s));
+      font-weight: 700;
+      line-height: 1.25;
+      letter-spacing: calc(0.5px * var(--s));
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+    }
+
+    .streak {
+      margin-top: calc(38px * var(--s));
+      display: flex;
+      align-items: flex-end;
+      gap: calc(12px * var(--s));
+    }
+
+    .streak-num {
+      font-size: calc(158px * var(--s));
+      font-weight: 900;
+      line-height: 0.86;
+      letter-spacing: calc(-6px * var(--s));
+      font-variant-numeric: tabular-nums;
+      background: linear-gradient(178deg, #ffffff 12%, #cfe9ff 58%, #9dc9ee 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      filter: drop-shadow(0 calc(10px * var(--s)) calc(26px * var(--s)) rgba(0, 0, 0, 0.42));
+    }
+
+    .streak-unit {
+      padding-bottom: calc(22px * var(--s));
+      font-size: calc(26px * var(--s));
+      font-weight: 500;
+      color: var(--ink-soft);
+    }
+
+    .streak-label {
+      margin-top: calc(6px * var(--s));
+      font-size: calc(16px * var(--s));
+      letter-spacing: calc(2px * var(--s));
+      color: var(--ink-faint);
+    }
+
+    .divider {
+      height: 1px;
+      margin: calc(34px * var(--s)) 0 calc(26px * var(--s));
+      background: linear-gradient(90deg, var(--line), rgba(255, 255, 255, 0.02));
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: calc(10px * var(--s));
+    }
+
+    .stat-value {
+      font-size: calc(32px * var(--s));
+      font-weight: 700;
+      line-height: 1.1;
+      font-variant-numeric: tabular-nums;
+      color: var(--ink);
+    }
+
+    .stat-label {
+      margin-top: calc(8px * var(--s));
+      font-size: calc(14px * var(--s));
+      letter-spacing: calc(1px * var(--s));
+      color: var(--ink-faint);
+    }
+
+    .status {
+      margin-top: calc(34px * var(--s));
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: calc(12px * var(--s));
+      padding: calc(16px * var(--s)) calc(20px * var(--s));
+      border-radius: calc(20px * var(--s));
+      background: linear-gradient(120deg, rgba(127, 208, 255, 0.20), rgba(185, 167, 255, 0.14));
+      border: 1px solid rgba(255, 255, 255, 0.18);
+    }
+
+    .status-title {
+      font-size: calc(19px * var(--s));
+      font-weight: 500;
+      color: var(--ink);
+    }
+
+    .status-points {
+      font-size: calc(22px * var(--s));
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+
+    .footer {
+      margin-top: calc(26px * var(--s));
+      font-size: calc(15px * var(--s));
+      line-height: 1.7;
+      letter-spacing: calc(0.5px * var(--s));
+      color: var(--ink-faint);
+    }
+  </style>
+</head>
+<body>
+  <div id="root" data-side="{{ side }}">
+    {% if bg.is_image %}
+    <img class="bg" src="{{ bg.src }}" alt="">
+    {% else %}
+    <div class="bg bg--gradient"></div>
+    {% endif %}
+
+    <div class="scrim" data-side="{{ side }}" style="opacity: {{ scrim_opacity }}"></div>
+
+    <div id="glass">
+      <div class="panel-inner">
+        <div class="kicker">{{ text.kicker }}</div>
+        <div class="date">{{ text.date }} · {{ text.weekday }}</div>
+        <div class="name">{{ text.name }}</div>
+
+        <div class="streak">
+          <div class="streak-num">{{ text.streak }}</div>
+          <div class="streak-unit">天</div>
+        </div>
+        <div class="streak-label">连续打卡</div>
+
+        <div class="divider"></div>
+
+        <div class="stats">
+          <div>
+            <div class="stat-value">{{ text.total_days }}</div>
+            <div class="stat-label">累计签到</div>
+          </div>
+          <div>
+            <div class="stat-value">{{ text.points }}</div>
+            <div class="stat-label">总积分</div>
+          </div>
+          <div>
+            <div class="stat-value">{{ text.rank }}</div>
+            <div class="stat-label">排行榜</div>
+          </div>
+        </div>
+
+        <div class="status">
+          <div class="status-title">{{ text.status_title }}</div>
+          <div class="status-points">{{ text.status_points }}</div>
+        </div>
+
+        <div class="footer">{{ text.footer }}</div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    const cfg = {{ glass_json | safe }};
+
+    /**
+     * 液态玻璃是**渐进增强**：#glass 本身已经是一块 CSS 毛玻璃（backdrop-filter），
+     * 这里只是在它上面再叠一层 LiquidGlass 的 WebGL 折射面板。
+     * 因此无论 CDN 不可达、渲染服务没有 WebGL、还是截图抢在出画之前，
+     * 卡片都仍然是一张完整的玻璃卡片。
+     */
+
+    /** 等 shader 上传完底图并跑过几帧模糊：头几帧是白的，不能拿去截图。 */
+    const settle = () =>
+      new Promise((resolve) => {
+        let frames = 0;
+        const tick = () => {
+          frames += 1;
+          if (frames >= 3) {
+            setTimeout(resolve, 260);
+            return;
+          }
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+        setTimeout(resolve, 4000);
+      });
+
+    const upgrade = async () => {
+      const rootEl = document.getElementById('root');
+      const glassEl = document.getElementById('glass');
+      if (!rootEl || !glassEl) return;
+
+      // LiquidGlass 是把"同级底图"采样进 shader 的：没有真实的 <img> 可采，
+      // 它只会输出一块发白的面板。所以纯渐变背景直接用 CSS 毛玻璃，效果更好也更稳。
+      if (!cfg.hasImage) {
+        console.warn('[azuresignin] no background image, CSS glass stays active.');
+        return;
+      }
+
+      const probe = document.createElement('canvas');
+      if (!probe.getContext('webgl') && !probe.getContext('experimental-webgl')) {
+        console.warn('[azuresignin] WebGL unavailable, CSS glass stays active.');
+        return;
+      }
+
+      try {
+        const mod = await import(cfg.cdn);
+        const LiquidGlass = mod.LiquidGlass || (mod.default && mod.default.LiquidGlass);
+        if (!LiquidGlass) throw new Error('LiquidGlass export not found');
+
+        const instance = await LiquidGlass.init({
+          root: rootEl,
+          glassElements: [glassEl],
+          defaults: cfg.options
+        });
+        window.__azureGlass = instance;
+
+        await settle();
+        glassEl.classList.add('is-liquid');
+      } catch (err) {
+        glassEl.classList.remove('is-liquid');
+        console.warn('[azuresignin] liquid glass skipped, CSS glass stays active:', err);
+      }
+    };
+
+    if (cfg && cfg.enabled) {
+      if (document.readyState === 'complete') {
+        upgrade();
+      } else {
+        window.addEventListener('load', upgrade, { once: true });
+      }
+    }
+  </script>
+</body>
+</html>
