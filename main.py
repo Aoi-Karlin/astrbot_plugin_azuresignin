@@ -534,6 +534,21 @@ class AzureSignInPlugin(Star):
         else:
             yield event.plain_result(self._fallback_text(record, signed, gained))
 
+    @filter.regex(r"^(打卡|签到)[!！。.]*$")
+    async def sign_in_without_prefix(self, event: AstrMessageEvent):
+        """群聊里直接说「签到」「打卡」也能打卡，不需要前缀或 @ 机器人。
+
+        AstrBot 的 ``filter.command`` 要求消息先被唤醒（前缀或 @），
+        而 ``filter.regex`` 不受此限制，所以用它兜住"裸"签到。
+        带前缀 / @ / 私聊时两个过滤器会同时命中，这里交还给指令处理器，
+        避免同一条消息触发两次打卡。
+        """
+        if event.is_at_or_wake_command:
+            return
+
+        async for result in self.sign_in(event):
+            yield result
+
     @filter.command("打卡排行", alias={"签到排行", "打卡排行榜"})
     async def leaderboard(self, event: AstrMessageEvent):
         """查看打卡积分排行榜"""
