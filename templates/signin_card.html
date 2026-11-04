@@ -15,18 +15,70 @@
   <style>
     :root {
       --s: {{ scale }};
-      --ink: #f5f8ff;
-      --ink-soft: rgba(245, 248, 255, 0.72);
-      --ink-faint: rgba(245, 248, 255, 0.48);
-      --accent: #7fd0ff;
-      --accent-2: #b9a7ff;
-      --line: rgba(255, 255, 255, 0.16);
-      --aurora:
-        radial-gradient(90% 60% at 12% 8%, rgba(120, 205, 255, 0.55) 0%, rgba(120, 205, 255, 0) 62%),
-        radial-gradient(80% 55% at 88% 18%, rgba(160, 140, 255, 0.45) 0%, rgba(160, 140, 255, 0) 60%),
-        radial-gradient(85% 60% at 78% 92%, rgba(255, 150, 190, 0.35) 0%, rgba(255, 150, 190, 0) 62%),
-        radial-gradient(70% 50% at 20% 78%, rgba(90, 235, 210, 0.30) 0%, rgba(90, 235, 210, 0) 60%),
-        linear-gradient(155deg, #0d1b30 0%, #08101c 55%, #05070c 100%);
+
+      /* 天依蓝：洛天依的应援色，卡片的主色 */
+      --yi: #66ccff;
+      --yi-deep: #2f9fe0;
+
+      /* 墨色文字。底图是淡彩水彩，所以字要走深色，而不是白字 */
+      --ink: #23405f;
+      --ink-soft: rgba(35, 64, 95, 0.72);
+      --ink-faint: rgba(35, 64, 95, 0.50);
+      --line: rgba(52, 98, 140, 0.18);
+
+      /* 面板底色：乳白玻璃。深色底图上靠 dark 变体加厚，而不是反转文字色，
+         这样墨蓝字在任何底图上都成立。
+         水彩插画的明暗分布很碎，面板必须够厚，否则斜穿过的深色形状会压住文字。 */
+      --glass-1: rgba(255, 255, 255, 0.80);
+      --glass-2: rgba(255, 255, 255, 0.66);
+      --glass-3: rgba(255, 255, 255, 0.74);
+      --glass-edge: rgba(255, 255, 255, 0.88);
+      --glass-blur: 44px;
+      --veil-1: rgba(255, 255, 255, 0.62);
+      --veil-2: rgba(255, 255, 255, 0.50);
+      --veil-3: rgba(255, 255, 255, 0.58);
+      --glass-lift: rgba(60, 108, 158, 0.22);
+
+      /* 连续天数的大号数字渐变 */
+      --streak-a: #2f9fe0;
+      --streak-b: #66ccff;
+      --streak-c: #a9e6ff;
+      --streak-glow: rgba(79, 180, 234, 0.30);
+
+      /* 手绘线稿已经染成墨蓝，透明度单独控制 */
+      --sign-opacity: 0.55;
+
+      /* 面板外那侧柔光：浅色底压白 */
+      --scrim-edge: rgba(250, 253, 255, 0.92);
+      --scrim-mid: rgba(250, 253, 255, 0.58);
+      --scrim-far: rgba(250, 253, 255, 0.10);
+      --scrim-bottom: rgba(255, 255, 255, 0.34);
+
+      /* 没有底图时的备用背景：淡蓝到粉紫的水彩感 */
+      --sky:
+        radial-gradient(70% 55% at 18% 12%, rgba(160, 224, 255, 0.85) 0%, rgba(160, 224, 255, 0) 62%),
+        radial-gradient(60% 50% at 82% 22%, rgba(206, 197, 255, 0.70) 0%, rgba(206, 197, 255, 0) 60%),
+        radial-gradient(70% 55% at 74% 88%, rgba(255, 196, 219, 0.62) 0%, rgba(255, 196, 219, 0) 62%),
+        linear-gradient(165deg, #eaf4fd 0%, #dceafb 48%, #e8e4f8 100%);
+    }
+
+    /* 深色底图（夜空、暗色插画）：把玻璃加厚、柔光加深，
+       让面板彻底挡住底图，墨蓝字照样清楚。文字配色不动。 */
+    #root[data-dark="true"] {
+      --glass-1: rgba(250, 253, 255, 0.94);
+      --glass-2: rgba(240, 248, 255, 0.86);
+      --glass-3: rgba(247, 252, 255, 0.90);
+      --glass-edge: rgba(255, 255, 255, 0.72);
+      --glass-blur: 52px;
+      --veil-1: rgba(255, 255, 255, 0.74);
+      --veil-2: rgba(255, 255, 255, 0.64);
+      --veil-3: rgba(255, 255, 255, 0.70);
+      --glass-lift: rgba(2, 8, 18, 0.52);
+
+      --scrim-edge: rgba(6, 14, 26, 0.78);
+      --scrim-mid: rgba(6, 14, 26, 0.44);
+      --scrim-far: rgba(6, 14, 26, 0.10);
+      --scrim-bottom: rgba(6, 14, 26, 0.40);
     }
 
     *, *::before, *::after { box-sizing: border-box; }
@@ -34,7 +86,7 @@
     html, body {
       margin: 0;
       padding: 0;
-      background: #070a10;
+      background: #eaf3fb;
       font-family: "Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
       -webkit-font-smoothing: antialiased;
       text-rendering: geometricPrecision;
@@ -47,29 +99,32 @@
       display: flex;
       align-items: center;
       overflow: hidden;
-      background: #0a0f18;
+      background: #e8f2fb;
       isolation: isolate;
     }
 
     #root[data-side="right"] { justify-content: flex-end; }
     #root[data-side="left"] { justify-content: flex-start; }
 
-    /* ---------- 底图 ---------- */
+    /* ---------- 底图 ----------
+       横版插画放进竖版卡片里，靠 object-position 把人物让到没有文字的一侧。 */
     .bg {
       position: absolute;
       inset: 0;
       width: 100%;
       height: 100%;
       object-fit: cover;
-      object-position: center;
+      object-position: {{ bg_position }};
       z-index: 0;
     }
 
     .bg--gradient {
-      background: var(--aurora);
+      background: var(--sky);
     }
 
-    /* ---------- 压暗层 ---------- */
+    /* ---------- 柔光层 ----------
+       往文字一侧轻轻压一层，让面板外的画面更"退后"，
+       同时不至于把水彩的粉蓝色洗掉。浅色底压白，深色底压暗。 */
     .scrim {
       position: absolute;
       inset: 0;
@@ -79,41 +134,54 @@
 
     .scrim[data-side="right"] {
       background:
-        linear-gradient(270deg, rgba(4, 7, 13, 0.9) 0%, rgba(4, 7, 13, 0.55) 38%, rgba(4, 7, 13, 0.08) 72%, rgba(4, 7, 13, 0.22) 100%),
-        linear-gradient(0deg, rgba(4, 7, 13, 0.55) 0%, rgba(4, 7, 13, 0) 45%);
+        linear-gradient(270deg, var(--scrim-edge) 0%, var(--scrim-mid) 34%, var(--scrim-far) 66%, transparent 100%),
+        linear-gradient(0deg, var(--scrim-bottom) 0%, transparent 42%);
     }
 
     .scrim[data-side="left"] {
       background:
-        linear-gradient(90deg, rgba(4, 7, 13, 0.9) 0%, rgba(4, 7, 13, 0.55) 38%, rgba(4, 7, 13, 0.08) 72%, rgba(4, 7, 13, 0.22) 100%),
-        linear-gradient(0deg, rgba(4, 7, 13, 0.55) 0%, rgba(4, 7, 13, 0) 45%);
+        linear-gradient(90deg, var(--scrim-edge) 0%, var(--scrim-mid) 34%, var(--scrim-far) 66%, transparent 100%),
+        linear-gradient(0deg, var(--scrim-bottom) 0%, transparent 42%);
     }
 
     /* ---------- 玻璃面板 ---------- */
     #glass {
       position: relative;
       z-index: 2;
-      width: calc(100% * 0.48);
-      margin: 0 calc(56px * var(--s));
-      padding: calc(52px * var(--s)) calc(46px * var(--s));
-      border-radius: calc(52px * var(--s));
+      width: calc(100% * 0.50);
+      margin: 0 calc(52px * var(--s));
+      padding: calc(46px * var(--s)) calc(42px * var(--s)) calc(38px * var(--s));
+      border-radius: calc(46px * var(--s));
       color: var(--ink);
-      /* CSS 毛玻璃：LiquidGlass(WebGL) 不可用或尚未完成时，卡片依然成立 */
+
+      /* CSS 毛玻璃：LiquidGlass(WebGL) 不可用或尚未完成时，卡片依然成立。 */
       background:
-        linear-gradient(155deg, rgba(255, 255, 255, 0.20) 0%, rgba(255, 255, 255, 0.06) 46%, rgba(255, 255, 255, 0.12) 100%);
-      -webkit-backdrop-filter: blur(26px) saturate(1.6) brightness(0.98);
-      backdrop-filter: blur(26px) saturate(1.6) brightness(0.98);
-      border: 1px solid rgba(255, 255, 255, 0.26);
+        linear-gradient(158deg, var(--glass-1) 0%, var(--glass-2) 46%, var(--glass-3) 100%);
+      -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.5) brightness(1.10);
+      backdrop-filter: blur(var(--glass-blur)) saturate(1.5) brightness(1.10);
+      border: 1px solid var(--glass-edge);
       box-shadow:
-        0 calc(28px * var(--s)) calc(70px * var(--s)) rgba(0, 0, 0, 0.46),
-        inset 0 1px 0 rgba(255, 255, 255, 0.46),
-        inset 0 -1px 0 rgba(255, 255, 255, 0.10);
+        0 calc(24px * var(--s)) calc(64px * var(--s)) var(--glass-lift),
+        inset 0 1px 0 rgba(255, 255, 255, 0.95),
+        inset 0 -1px 0 rgba(255, 255, 255, 0.55);
     }
 
-    /* LiquidGlass 注入的 canvas 默认 z-index:-1，也就是被 #glass 的 CSS 玻璃盖住。
-       只有确认 shader 已经拿到底图、并且画出稳定帧之后，才加 .is-liquid：
-       此时抬升 canvas 并撤掉 CSS 玻璃，完成一次干净的交接。
-       这样截图永远落在"要么 CSS 玻璃、要么真玻璃"上，不会拍到空白帧。 */
+    /* 面板内侧的白雾。LiquidGlass 渲染的是"折射后的底图"，本身是透的：
+       底图上的深色形状会原样透上来，墨蓝字就压不住了。
+      这层白雾叠在 canvas 之上、文字之下，负责把面板压成磨砂；
+      内缩 3px 是为了不盖掉玻璃自身的边缘高光。 */
+    .veil {
+      position: absolute;
+      inset: calc(3px * var(--s));
+      z-index: 2;
+      border-radius: calc(44px * var(--s));
+      background:
+        linear-gradient(165deg, var(--veil-1) 0%, var(--veil-2) 52%, var(--veil-3) 100%);
+      pointer-events: none;
+    }
+
+    /* LiquidGlass 注入的 canvas 默认 z-index:-1，会被 #glass 的背景盖住。
+       确认 shader 出画后加 .is-liquid：撤掉 CSS 玻璃、把 canvas 抬到 veil 之下。 */
     #glass.is-liquid {
       background: transparent;
       -webkit-backdrop-filter: none;
@@ -122,89 +190,106 @@
       box-shadow: none;
     }
 
-    #glass.is-liquid > canvas { z-index: 2 !important; }
-    #glass.is-liquid::before { display: none; }
+    #glass.is-liquid > canvas { z-index: 1 !important; }
 
     .panel-inner { position: relative; z-index: 3; }
 
-    .kicker {
+    /* ---------- 头部：天依徽记 + 标题 ---------- */
+    .head {
       display: flex;
       align-items: center;
-      gap: calc(12px * var(--s));
-      font-size: calc(14px * var(--s));
+      gap: calc(14px * var(--s));
+    }
+
+    .badge {
+      position: relative;
+      flex: none;
+      width: calc(52px * var(--s));
+      height: calc(52px * var(--s));
+      border-radius: 50%;
+      background: linear-gradient(150deg, #9fe0ff 0%, var(--yi) 46%, #4fb4ea 100%);
+      box-shadow: 0 calc(6px * var(--s)) calc(16px * var(--s)) rgba(79, 180, 234, 0.45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* 徽记里的音符 */
+    .badge svg {
+      width: calc(28px * var(--s));
+      height: calc(28px * var(--s));
+      fill: #ffffff;
+      opacity: 0.95;
+    }
+
+    .kicker {
+      font-size: calc(13px * var(--s));
       font-weight: 700;
-      letter-spacing: calc(4px * var(--s));
-      color: var(--accent);
+      letter-spacing: calc(3.5px * var(--s));
+      color: var(--yi-deep);
       text-transform: uppercase;
     }
 
-    .kicker::before {
-      content: "";
-      width: calc(28px * var(--s));
-      height: 2px;
-      border-radius: 2px;
-      background: linear-gradient(90deg, var(--accent), var(--accent-2));
-      box-shadow: 0 0 calc(12px * var(--s)) rgba(127, 208, 255, 0.85);
-    }
-
     .date {
-      margin-top: calc(22px * var(--s));
-      font-size: calc(17px * var(--s));
+      margin-top: calc(6px * var(--s));
+      font-size: calc(16px * var(--s));
       font-weight: 400;
-      letter-spacing: calc(1px * var(--s));
+      letter-spacing: calc(0.6px * var(--s));
       color: var(--ink-faint);
     }
 
     .name {
-      margin-top: calc(10px * var(--s));
-      font-size: calc(34px * var(--s));
+      margin-top: calc(26px * var(--s));
+      font-size: calc(32px * var(--s));
       font-weight: 700;
-      line-height: 1.25;
-      letter-spacing: calc(0.5px * var(--s));
+      line-height: 1.24;
+      letter-spacing: calc(0.4px * var(--s));
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
       max-width: 100%;
     }
 
+    /* ---------- 连续天数 ---------- */
     .streak {
-      margin-top: calc(38px * var(--s));
+      margin-top: calc(30px * var(--s));
       display: flex;
       align-items: flex-end;
-      gap: calc(12px * var(--s));
+      gap: calc(10px * var(--s));
     }
 
     .streak-num {
-      font-size: calc(158px * var(--s));
+      font-size: calc(146px * var(--s));
       font-weight: 900;
-      line-height: 0.86;
-      letter-spacing: calc(-6px * var(--s));
+      line-height: 0.84;
+      letter-spacing: calc(-5px * var(--s));
       font-variant-numeric: tabular-nums;
-      background: linear-gradient(178deg, #ffffff 12%, #cfe9ff 58%, #9dc9ee 100%);
+      background: linear-gradient(172deg, var(--streak-a) 4%, var(--streak-b) 62%, var(--streak-c) 100%);
       -webkit-background-clip: text;
       background-clip: text;
       color: transparent;
-      filter: drop-shadow(0 calc(10px * var(--s)) calc(26px * var(--s)) rgba(0, 0, 0, 0.42));
+      filter: drop-shadow(0 calc(6px * var(--s)) calc(16px * var(--s)) var(--streak-glow));
     }
 
     .streak-unit {
-      padding-bottom: calc(22px * var(--s));
-      font-size: calc(26px * var(--s));
+      padding-bottom: calc(20px * var(--s));
+      font-size: calc(25px * var(--s));
       font-weight: 500;
       color: var(--ink-soft);
     }
 
     .streak-label {
-      margin-top: calc(6px * var(--s));
-      font-size: calc(16px * var(--s));
+      margin-top: calc(8px * var(--s));
+      font-size: calc(15px * var(--s));
       letter-spacing: calc(2px * var(--s));
       color: var(--ink-faint);
     }
 
+    /* ---------- 数据 ---------- */
     .divider {
       height: 1px;
-      margin: calc(34px * var(--s)) 0 calc(26px * var(--s));
-      background: linear-gradient(90deg, var(--line), rgba(255, 255, 255, 0.02));
+      margin: calc(30px * var(--s)) 0 calc(24px * var(--s));
+      background: linear-gradient(90deg, var(--line), rgba(52, 98, 140, 0.02));
     }
 
     .stats {
@@ -214,7 +299,7 @@
     }
 
     .stat-value {
-      font-size: calc(32px * var(--s));
+      font-size: calc(30px * var(--s));
       font-weight: 700;
       line-height: 1.1;
       font-variant-numeric: tabular-nums;
@@ -222,49 +307,66 @@
     }
 
     .stat-label {
-      margin-top: calc(8px * var(--s));
-      font-size: calc(14px * var(--s));
-      letter-spacing: calc(1px * var(--s));
+      margin-top: calc(7px * var(--s));
+      font-size: calc(13px * var(--s));
+      letter-spacing: calc(0.8px * var(--s));
       color: var(--ink-faint);
     }
 
+    /* ---------- 状态条 ---------- */
     .status {
-      margin-top: calc(34px * var(--s));
+      margin-top: calc(30px * var(--s));
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: calc(12px * var(--s));
-      padding: calc(16px * var(--s)) calc(20px * var(--s));
-      border-radius: calc(20px * var(--s));
-      background: linear-gradient(120deg, rgba(127, 208, 255, 0.20), rgba(185, 167, 255, 0.14));
-      border: 1px solid rgba(255, 255, 255, 0.18);
+      padding: calc(15px * var(--s)) calc(20px * var(--s));
+      border-radius: calc(18px * var(--s));
+      background: linear-gradient(120deg, rgba(102, 204, 255, 0.24), rgba(178, 214, 255, 0.18));
+      border: 1px solid rgba(102, 204, 255, 0.42);
     }
 
     .status-title {
-      font-size: calc(19px * var(--s));
+      font-size: calc(18px * var(--s));
       font-weight: 500;
       color: var(--ink);
     }
 
     .status-points {
-      font-size: calc(22px * var(--s));
+      font-size: calc(21px * var(--s));
       font-weight: 700;
       font-variant-numeric: tabular-nums;
-      color: var(--accent);
+      color: var(--yi-deep);
       white-space: nowrap;
     }
 
+    /* ---------- 落款：用户手绘的洛天依线稿 ---------- */
+    .sign {
+      margin-top: calc(22px * var(--s));
+      display: flex;
+      align-items: center;
+      gap: calc(6px * var(--s));
+    }
+
+    .sign img {
+      flex: none;
+      width: calc(168px * var(--s));
+      height: auto;
+      opacity: var(--sign-opacity);
+    }
+
     .footer {
-      margin-top: calc(26px * var(--s));
-      font-size: calc(15px * var(--s));
-      line-height: 1.7;
-      letter-spacing: calc(0.5px * var(--s));
+      flex: 1;
+      padding-bottom: calc(2px * var(--s));
+      font-size: calc(13px * var(--s));
+      line-height: 1.6;
+      letter-spacing: calc(0.3px * var(--s));
       color: var(--ink-faint);
     }
   </style>
 </head>
 <body>
-  <div id="root" data-side="{{ side }}">
+  <div id="root" data-side="{{ side }}" data-dark="{{ 'true' if is_dark else 'false' }}">
     {% if bg.is_image %}
     <img class="bg" src="{{ bg.src }}" alt="">
     {% else %}
@@ -274,9 +376,21 @@
     <div class="scrim" data-side="{{ side }}" style="opacity: {{ scrim_opacity }}"></div>
 
     <div id="glass">
+      <div class="veil"></div>
       <div class="panel-inner">
-        <div class="kicker">{{ text.kicker }}</div>
-        <div class="date">{{ text.date }} · {{ text.weekday }}</div>
+        <div class="head">
+          <div class="badge">
+            <!-- 音符：洛天依是虚拟歌手 -->
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 3v11.2a3.6 3.6 0 1 1-2-3.23V6.6l-8 1.7v8.9a3.6 3.6 0 1 1-2-3.23V7.6L20 5.2V3z"/>
+            </svg>
+          </div>
+          <div>
+            <div class="kicker">{{ text.kicker }}</div>
+            <div class="date">{{ text.date }} · {{ text.weekday }}</div>
+          </div>
+        </div>
+
         <div class="name">{{ text.name }}</div>
 
         <div class="streak">
@@ -307,7 +421,12 @@
           <div class="status-points">{{ text.status_points }}</div>
         </div>
 
-        <div class="footer">{{ text.footer }}</div>
+        <div class="sign">
+          {% if sign_src %}
+          <img src="{{ sign_src }}" alt="">
+          {% endif %}
+          <div class="footer">{{ text.footer }}</div>
+        </div>
       </div>
     </div>
   </div>
