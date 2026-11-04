@@ -59,7 +59,7 @@ AstrBot 每日打卡插件：打卡、连续天数、积分与排行榜，卡片
 | 配置项 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `glass_enabled` | bool | `true` | 是否启用 WebGL 液态玻璃 |
-| `glass_cdn` | string | 空 | LiquidGlass 脚本地址，留空用官方 CDN；国内可换 jsDelivr 镜像 |
+| `glass_cdn` | string | 空 | LiquidGlass 脚本地址，留空用内置默认（jsdmirror 镜像）；镜像不可达时可改回 jsDelivr |
 | `glass_blur` | float | `0.72` | 模糊程度，调大更朦胧、文字更清晰 |
 | `glass_refraction` | float | `0.42` | 折射强度，调大能看到更明显的形变 |
 | `glass_tint` | float | `0.18` | 冷色调强度 |
@@ -111,6 +111,17 @@ AstrBot 每日打卡插件：打卡、连续天数、积分与排行榜，卡片
 
 两者都可以在配置里替换成自己的图。
 
-## 依赖
+## 依赖与渲染
 
-`requirements.txt`：`aiohttp`、`pillow`。
+`requirements.txt`：`playwright`、`jinja2`。
+
+卡片由插件自己用 Playwright 驱动无头 Chromium 渲染，不走 AstrBot 的 t2i，也不依赖 Pillow。首次安装除了装 Python 包，还要装一次浏览器：
+
+```bash
+pip install playwright
+playwright install chromium
+```
+
+如果漏了这一步，`/打卡` 会在日志里报「Chromium 未就绪」，装完重启 AstrBot 即可。
+
+渲染是本地进程内完成的，所以模板可以直接用 `file://` 引用底图和落款，不需要把图片转成 base64。

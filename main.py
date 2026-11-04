@@ -9,20 +9,167 @@ WebGL 不可用时自动退化为 CSS 毛玻璃。
 from __future__ import annotations
 
 import asyncio
-import base64
-import io
+import asyncio
 import json
 import time
 import uuid
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-import aiohttp
-from PIL import Image as PILImage
+import jinja2
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools
+
+class HtmlRenderer:
+    """Render plugin HTML to an image with a headless Chromium via Playwright.
+
+    AstrBot's built-in t2i either calls a remote service or leans on Pillow, and
+    neither fits a plugin whose artwork lives on the local disk. Driving
+    Chromium in-process keeps rendering local and lets templates point straight
+    at ``file://`` assets.
+    """
+
+    def __init__(self, work_dir: Path) -> None:
+        self.work_dir = work_dir
+        self._playwright = None
+        self._browser = None
+        self._context = None
+        # 允许 2 个页面同时渲染；浏览器复用同一个 context 以保留 HTTP 缓存。
+        self._lock = asyncio.Semaphore(2)
+
+    async def _ensure_browser(self):
+        """Start Chromium on first use and reuse it afterwards.
+
+        Returns:
+            The connected browser instance.
+
+        Raises:
+            RuntimeError: When playwright or its browser is not installed.
+        """
+        if self._browser is not None and self._browser.is_connected():
+            return self._browser
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError as exc:
+            raise RuntimeError(
+                "缺少 playwright，请先执行：pip install playwright && playwright install chromium"
+            ) from exc
+        self._playwright = await async_playwright().start()
+        try:
+            self._browser = await self._playwright.chromium.launch(
+                # 允许画布回读 file:// 图片的像素，模板用它判断玻璃厚度。
+                args=[
+                    "--no-sandbox",
+                    "--allow-file-access-from-files",
+                    "--font-render-hinting=none",
+                ],
+            )
+        except Exception as exc:
+            await self._playwright.stop()
+            self._playwright = None
+            raise RuntimeError("Chromium 未就绪，请执行：playwright install chromium") from exc
+        return self._browser
+
+    async def render(
+        self,
+        html: str,
+        out_path: Path,
+        image_format: str = "jpeg",
+        quality: int = 92,
+    ) -> Path | None:
+        """把 HTML 渲染成图片。
+
+        Args:
+            html: 完整文档。
+            out_path: 输出路径。
+            image_format: ``jpeg`` 或 ``png``。
+            quality: JPEG 质量。
+
+        Returns:
+            写出成功时返回 ``out_path``，否则 None。
+        """
+        source = self.work_dir / f"page_{uuid.uuid4().hex}.html"
+        try:
+            source.write_text(html, encoding="utf-8")
+        except OSError as exc:
+            logger.error(f"写入渲染页面失败：{exc}")
+            return None
+
+        async with self._lock:
+            try:
+                browser = await self._ensure_browser()
+                if self._context is None:
+                    self._context = await browser.new_context(
+                        viewport={"width": 2200, "height": 1600},
+                        device_scale_factor=1,
+                    )
+                context = self._context
+            except RuntimeError:
+                source.unlink(missing_ok=True)
+                raise
+            page = await context.new_page()
+            try:
+                await page.goto(source.as_uri(), wait_until="load")
+                try:
+                    await page.wait_for_function(
+                        "window.__renderReady === true", timeout=12000
+                    )
+                except Exception:
+                    logger.warning("模板未上报 __renderReady，按当前状态截图")
+                try:
+                    await page.evaluate("document.fonts && document.fonts.ready")
+                except Exception:
+                    pass
+                await page.wait_for_timeout(80)
+
+                size = await page.evaluate(
+                    "() => { const r = document.getElementById('root').getBoundingClientRect();"
+                    " return {w: Math.ceil(r.width), h: Math.ceil(r.height)}; }"
+                )
+                width, height = int(size["w"]), int(size["h"])
+                if width <= 0 or height <= 0:
+                    logger.error("渲染页面尺寸异常")
+                    return None
+
+                await page.set_viewport_size({"width": width, "height": height})
+                await page.wait_for_timeout(60)
+                shot = {"path": str(out_path), "clip": {
+                    "x": 0, "y": 0, "width": width, "height": height}}
+                if image_format == "png":
+                    await page.screenshot(type="png", **shot)
+                else:
+                    await page.screenshot(type="jpeg", quality=quality, **shot)
+            except Exception:
+                logger.error("Playwright 渲染失败", exc_info=True)
+                return None
+            finally:
+                await page.close()
+                source.unlink(missing_ok=True)
+        return out_path if out_path.is_file() else None
+
+    async def close(self) -> None:
+        """释放浏览器与 playwright 驱动。"""
+        if self._context is not None:
+            try:
+                await self._context.close()
+            except Exception:
+                pass
+            self._context = None
+        if self._browser is not None:
+            try:
+                await self._browser.close()
+            except Exception:
+                pass
+            self._browser = None
+        if self._playwright is not None:
+            try:
+                await self._playwright.stop()
+            except Exception:
+                pass
+            self._playwright = None
+
 
 PLUGIN_NAME = "astrbot_plugin_azuresignin"
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "signin_card.html"
@@ -30,7 +177,7 @@ SIGNATURE_PATH = Path(__file__).parent / "assets" / "signature.png"
 DEFAULT_BACKGROUND_PATH = Path(__file__).parent / "assets" / "default_bg.jpg"
 
 #: LiquidGlass 的 ESM 入口。插件不做本地托管：卡片是在渲染服务（WebView）里执行的。
-LIQUID_GLASS_CDN = "https://cdn.jsdelivr.net/npm/@ybouane/liquidglass@1/dist/index.js"
+LIQUID_GLASS_CDN = "https://cdn.jsdmirror.com/npm/@ybouane/liquidglass/dist/index.js"
 #: 渲染配置默认值（与 _conf_schema.json 保持一致，用户配置缺失时兜底）。
 RENDER_DEFAULTS = {
     "background_file": [],
@@ -93,9 +240,15 @@ class AzureSignInPlugin(Star):
             self.template = ""
             logger.error(f"读取打卡卡片模板失败：{exc}")
 
-        self._lock = asyncio.Lock()
-        self._bg_cache: dict[str, str] = {}
+        # 允许 2 个页面同时渲染；浏览器复用同一个 context 以保留 HTTP 缓存。
+        self._lock = asyncio.Semaphore(2)
         self._sign_cache: str | None = None
+        self._env = jinja2.Environment(autoescape=False)
+        self.renderer = HtmlRenderer(self.cache_dir)
+
+    async def terminate(self) -> None:
+        """插件卸载时关掉无头浏览器。"""
+        await self.renderer.close()
 
     async def initialize(self) -> None:
         """插件激活时清理过期的卡片缓存。"""
@@ -204,154 +357,39 @@ class AzureSignInPlugin(Star):
 
     # ------------------------------------------------------------- 背景与渲染
 
-    async def _fetch_image(self, src: str) -> tuple[bytes, str] | None:
-        """读取图片原始字节（网络或本地），供后续编码。
+    def _side(self) -> str:
+        """返回文字面板所在的一侧，只可能是 ``left`` 或 ``right``。"""
+        return (
+            "left"
+            if str(self.render_cfg.get("text_side", "right")).lower() == "left"
+            else "right"
+        )
+
+    def _to_url(self, src: str) -> str:
+        """把配置里的图片引用统一成页面可直接加载的 URL。
+
+        上传文件存的是相对插件数据目录的路径；也接受 http(s) 直链、file://
+        与本机绝对路径。
 
         Args:
-            src: http(s) 链接、file:// URI 或本地路径。
+            src: 配置值。
 
         Returns:
-            ``(原始字节, 缓存键)``；读取失败时返回 None。
+            可用的 URL；图片不存在时返回空字符串。
         """
         if src.startswith(("http://", "https://")):
-            try:
-                timeout = aiohttp.ClientTimeout(total=20)
-                async with aiohttp.ClientSession(timeout=timeout, trust_env=True) as session:
-                    async with session.get(src) as resp:
-                        if resp.status != 200:
-                            self.logger.warning(f"背景图下载失败（HTTP {resp.status}）：{src}")
-                            return None
-                        return await resp.read(), src
-            except Exception as exc:
-                self.logger.warning(f"背景图下载异常：{exc}")
-                return None
-
+            return src
         path = Path(src[7:]) if src.startswith("file://") else Path(src)
         if not path.is_absolute():
             path = self.data_dir / path
-        if not path.is_file():
-            self.logger.warning(f"背景图不存在：{path}")
-            return None
-        try:
-            return path.read_bytes(), f"{path}|{path.stat().st_mtime_ns}"
-        except OSError as exc:
-            self.logger.warning(f"读取背景图失败：{exc}")
-            return None
-
-    def _side(self) -> str:
-        """返回文字面板所在的一侧，只可能是 ``left`` 或 ``right``。"""
-        return "left" if str(self.render_cfg.get("text_side", "right")).lower() == "left" else "right"
-
-    async def _encode_background(self, src: str) -> tuple[str, bool] | None:
-        """把背景图转成 data URI，并判断面板区域是否需要反色文字。
-
-        data URI 可以避免跨域图片污染 canvas，LiquidGlass 才能正常采样；
-        顺带用 Pillow 量出面板落点附近的亮度，决定文字用墨色还是白色。
-
-        Args:
-            src: http(s) 链接、file:// URI 或本地路径。
-
-        Returns:
-            ``(data URI, 面板区域是否偏暗)``；失败时返回 None。
-        """
-        if src.startswith("data:"):
-            return src, False
-
-        fetched = await self._fetch_image(src)
-        if not fetched:
-            return None
-        raw, cache_key = fetched
-
-        cached = self._bg_cache.get(cache_key)
-        if cached:
-            return cached
-
-        encoded = await asyncio.to_thread(self._encode_image, raw, self._side())
-        if not encoded:
-            return None
-        if len(self._bg_cache) >= 8:
-            self._bg_cache.clear()
-        self._bg_cache[cache_key] = encoded
-        return encoded
-
-    @staticmethod
-    def _encode_image(raw: bytes, side: str = "right") -> tuple[str, bool] | None:
-        """压缩并编码背景图，同时判断面板将要落的那块区域够不够亮。
-
-        卡片面板上的文字是固定色，所以必须先知道底图的明暗：淡彩水彩上用深墨字，
-        深色夜空上就得换成白字，否则会出现"深蓝字压在深蓝玻璃上"。
-
-        Args:
-            raw: 原始图片字节。
-            side: 文字面板所在的一侧，``left`` 或 ``right``。
-
-        Returns:
-            ``(JPEG 的 data URI, 面板区域是否偏暗)``；无法解码时返回 None。
-        """
-        try:
-            with PILImage.open(io.BytesIO(raw)) as img:
-                img = img.convert("RGB")
-                img.thumbnail((1600, 2400), PILImage.Resampling.LANCZOS)
-
-                # 面板约占宽度的 44%~96%，垂直居中。取这块区域估算亮度。
-                width, height = img.size
-                left = 0.44 if side == "right" else 0.04
-                right = 0.96 if side == "right" else 0.56
-                box = (
-                    int(width * left),
-                    int(height * 0.18),
-                    max(int(width * right), int(width * left) + 1),
-                    max(int(height * 0.82), int(height * 0.18) + 1),
-                )
-                grey = img.crop(box).resize((32, 32), PILImage.Resampling.BILINEAR).convert("L")
-                luma = sum(grey.getdata()) / 1024 / 255
-
-                buffer = io.BytesIO()
-                img.save(buffer, format="JPEG", quality=88, optimize=True)
-                encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
-                # 阈值按淡彩水彩与夜空插画的分界取：实测浅色图 luma 0.47 以上，
-                # 唯一的暗色图是 0.32。玻璃本身还会提亮，所以只在明显偏暗时才加厚。
-                return f"data:image/jpeg;base64,{encoded}", luma < 0.45
-        except Exception:
-            return None
-
-    @staticmethod
-    def _encode_sign(raw: bytes, width: int = 420) -> str | None:
-        """把落款线稿裁到有效像素并缩成小 PNG，保留透明背景。
-
-        用户提供的线稿是一张大片留白的透明画布，直接塞进卡片会带着周围的空白。
-        这里按 alpha 通道裁出实际笔触，再等比缩到 ``width`` 宽。
-
-        Args:
-            raw: 原始 PNG 字节。
-            width: 输出宽度（像素）。
-
-        Returns:
-            PNG 的 data URI；无法解码或全透明时返回 None。
-        """
-        try:
-            with PILImage.open(io.BytesIO(raw)) as img:
-                img = img.convert("RGBA")
-                bbox = img.getchannel("A").getbbox()
-                if bbox:
-                    img = img.crop(bbox)
-                if img.width <= 0 or img.height <= 0:
-                    return None
-                height = max(1, round(img.height * width / img.width))
-                img = img.resize((width, height), PILImage.Resampling.LANCZOS)
-                buffer = io.BytesIO()
-                img.save(buffer, format="PNG", optimize=True)
-                encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
-                return f"data:image/png;base64,{encoded}"
-        except Exception:
-            return None
+        return path.as_uri() if path.is_file() else ""
 
     async def _resolve_background(self) -> dict:
-        """解析底部背景图：用户配置的图 → 内置默认插画 → 渐变兜底。
+        """解析卡片底图。
 
         Returns:
             ``{"is_image": bool, "src": str, "css": str, "is_dark": bool}``。
-            ``is_dark`` 表示面板区域的底图明显偏暗，玻璃需要加厚。
+            明暗由页面内的画布采样决定，这里不再计算。
         """
         gradient = {"is_image": False, "src": "", "css": "var(--sky)", "is_dark": False}
         uploaded = self.render_cfg.get("background_file")
@@ -371,29 +409,21 @@ class AzureSignInPlugin(Star):
             candidates.append(str(DEFAULT_BACKGROUND_PATH))
 
         for src in candidates:
-            src = src.strip()
-            if not src:
-                continue
-            encoded = await self._encode_background(src)
-            if encoded:
-                data_uri, is_dark = encoded
+            url = self._to_url(src.strip())
+            if url:
                 return {
                     "is_image": True,
-                    "src": data_uri,
-                    "css": f'url("{data_uri}")',
-                    "is_dark": is_dark,
+                    "src": url,
+                    "css": f'url("{url}")',
+                    "is_dark": False,
                 }
-            if src.startswith(("http://", "https://")):
-                # 下载失败时至少把原始链接交出去，渲染端若可直连仍能显示。
-                self.logger.warning(f"背景图预下载失败，改用原始链接：{src}")
-                return {"is_image": True, "src": src, "css": f'url("{src}")', "is_dark": False}
         return gradient
 
     async def _resolve_sign(self) -> str:
         """解析落款线稿：优先用配置里上传的图，否则用插件内置的手绘线稿。
 
         Returns:
-            可直接放进 ``<img src>`` 的 PNG data URI；不可用时返回空字符串。
+            可直接放进 ``<img src>`` 的 URL；不可用时返回空字符串。
         """
         if self._sign_cache is not None:
             return self._sign_cache
@@ -407,25 +437,12 @@ class AzureSignInPlugin(Star):
             candidates = []
 
         for src in candidates:
-            src = src.strip()
-            if not src:
-                continue
-            fetched = await self._fetch_image(src)
-            if fetched:
-                encoded = await asyncio.to_thread(self._encode_sign, fetched[0])
-                if encoded:
-                    self._sign_cache = encoded
-                    return encoded
+            url = self._to_url(src.strip())
+            if url:
+                self._sign_cache = url
+                return url
 
-        try:
-            raw = SIGNATURE_PATH.read_bytes()
-        except OSError as exc:
-            self.logger.warning(f"读取内置落款线稿失败：{exc}")
-            self._sign_cache = ""
-            return ""
-
-        data_uri = await asyncio.to_thread(self._encode_sign, raw)
-        self._sign_cache = data_uri or ""
+        self._sign_cache = SIGNATURE_PATH.as_uri() if SIGNATURE_PATH.is_file() else ""
         return self._sign_cache
 
     def _glass_json(self, has_image: bool) -> str:
@@ -508,47 +525,19 @@ class AzureSignInPlugin(Star):
             "text": text,
         }
 
-        options = {
-            "full_page": True,
-            "type": image_format,
-            "animations": "disabled",
-            "caret": "hide",
-        }
-        if image_format == "jpeg":
-            options["quality"] = 92
-
         try:
-            raw_path = await self.html_render(
-                self.template,
-                data,
-                return_url=False,
-                options=options,
-                umo=event.unified_msg_origin,
-            )
+            html = self._env.from_string(self.template).render(**data)
         except Exception:
-            self.logger.error("打卡卡片渲染失败。", exc_info=True)
-            return None
-
-        if not raw_path:
+            self.logger.error("打卡模板渲染失败。", exc_info=True)
             return None
 
         out_path = self.cache_dir / f"card_{uuid.uuid4().hex}.{image_format}"
         try:
-            with PILImage.open(raw_path) as img:
-                if img.width < width or img.height < height:
-                    self.logger.warning(
-                        f"渲染结果小于卡片尺寸（{img.width}x{img.height} < {width}x{height}），跳过裁切。"
-                    )
-                else:
-                    img = img.crop((0, 0, width, height))
-                if image_format == "jpeg":
-                    img.convert("RGB").save(out_path, format="JPEG", quality=92)
-                else:
-                    img.save(out_path, format="PNG")
-            return str(out_path)
-        except Exception:
-            self.logger.warning("卡片后处理失败，直接使用渲染原图。", exc_info=True)
-            return raw_path
+            rendered = await self.renderer.render(html, out_path, image_format=image_format)
+        except RuntimeError as exc:
+            self.logger.error(f"渲染器不可用：{exc}")
+            return None
+        return str(rendered) if rendered else None
 
     # ------------------------------------------------------------------ 业务
 

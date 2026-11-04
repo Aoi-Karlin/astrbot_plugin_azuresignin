@@ -122,7 +122,7 @@
         "description": "LiquidGlass 脚本地址",
         "type": "string",
         "default": "",
-        "hint": "留空使用官方 CDN。若服务器在国内访问 jsDelivr 较慢，可替换为镜像地址，例如 https://fastly.jsdelivr.net/npm/@ybouane/liquidglass@1/dist/index.js"
+        "hint": "LiquidGlass 脚本地址。留空使用内置默认（jsdmirror 镜像）；镜像不可达时可改回 https://cdn.jsdelivr.net/npm/@ybouane/liquidglass/dist/index.js"
       },
       "glass_blur": {
         "description": "玻璃模糊",
