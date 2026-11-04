@@ -26,6 +26,8 @@ from astrbot.api.star import Context, Star, StarTools
 
 PLUGIN_NAME = "astrbot_plugin_azuresignin"
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "signin_card.html"
+SIGNATURE_PATH = Path(__file__).parent / "assets" / "signature.png"
+DEFAULT_BACKGROUND_PATH = Path(__file__).parent / "assets" / "default_bg.jpg"
 
 #: LiquidGlass 的 ESM 入口。插件不做本地托管：卡片是在渲染服务（WebView）里执行的。
 LIQUID_GLASS_CDN = "https://cdn.jsdelivr.net/npm/@ybouane/liquidglass@1/dist/index.js"
@@ -33,6 +35,7 @@ LIQUID_GLASS_CDN = "https://cdn.jsdelivr.net/npm/@ybouane/liquidglass@1/dist/ind
 RENDER_DEFAULTS = {
     "background_file": [],
     "background_url": "",
+    "background_position": "",
     "text_side": "right",
     "card_width": 1000,
     "card_height": 1400,
@@ -40,13 +43,14 @@ RENDER_DEFAULTS = {
     "scrim_opacity": 0.55,
     "glass_enabled": True,
     "glass_cdn": "",
-    "glass_blur": 0.55,
-    "glass_refraction": 0.62,
-    "glass_tint": 0.42,
-    "glass_brightness": -0.28,
-    "glass_saturation": -0.30,
-    "glass_radius": 52,
-    "glass_shadow": 0.34,
+    "glass_blur": 0.72,
+    "glass_refraction": 0.42,
+    "glass_tint": 0.18,
+    "glass_brightness": 0.16,
+    "glass_saturation": -0.10,
+    "glass_radius": 46,
+    "glass_shadow": 0.20,
+    "signature_file": "",
     "kicker_text": "DAILY CHECK-IN",
     "footer_text": "愿每一次坚持，都被看见。",
 }
@@ -91,6 +95,7 @@ class AzureSignInPlugin(Star):
 
         self._lock = asyncio.Lock()
         self._bg_cache: dict[str, str] = {}
+        self._sign_cache: str | None = None
 
     async def initialize(self) -> None:
         """插件激活时清理过期的卡片缓存。"""
@@ -199,20 +204,15 @@ class AzureSignInPlugin(Star):
 
     # ------------------------------------------------------------- 背景与渲染
 
-    async def _to_data_uri(self, src: str) -> str | None:
-        """把背景图转成 data URI，避免跨域图片污染 canvas 导致玻璃效果失效。
+    async def _fetch_image(self, src: str) -> tuple[bytes, str] | None:
+        """读取图片原始字节（网络或本地），供后续编码。
 
         Args:
             src: http(s) 链接、file:// URI 或本地路径。
 
         Returns:
-            可直接放进 ``<img src>`` 的 data URI；失败时返回 None。
+            ``(原始字节, 缓存键)``；读取失败时返回 None。
         """
-        if src.startswith("data:"):
-            return src
-
-        raw: bytes | None = None
-        cache_key = src
         if src.startswith(("http://", "https://")):
             try:
                 timeout = aiohttp.ClientTimeout(total=20)
@@ -221,64 +221,139 @@ class AzureSignInPlugin(Star):
                         if resp.status != 200:
                             self.logger.warning(f"背景图下载失败（HTTP {resp.status}）：{src}")
                             return None
-                        raw = await resp.read()
+                        return await resp.read(), src
             except Exception as exc:
                 self.logger.warning(f"背景图下载异常：{exc}")
                 return None
-        else:
-            path = Path(src[7:]) if src.startswith("file://") else Path(src)
-            if not path.is_absolute():
-                path = self.data_dir / path
-            if not path.is_file():
-                self.logger.warning(f"背景图不存在：{path}")
-                return None
-            try:
-                raw = path.read_bytes()
-                cache_key = f"{path}|{path.stat().st_mtime_ns}"
-            except OSError as exc:
-                self.logger.warning(f"读取背景图失败：{exc}")
-                return None
+
+        path = Path(src[7:]) if src.startswith("file://") else Path(src)
+        if not path.is_absolute():
+            path = self.data_dir / path
+        if not path.is_file():
+            self.logger.warning(f"背景图不存在：{path}")
+            return None
+        try:
+            return path.read_bytes(), f"{path}|{path.stat().st_mtime_ns}"
+        except OSError as exc:
+            self.logger.warning(f"读取背景图失败：{exc}")
+            return None
+
+    def _side(self) -> str:
+        """返回文字面板所在的一侧，只可能是 ``left`` 或 ``right``。"""
+        return "left" if str(self.render_cfg.get("text_side", "right")).lower() == "left" else "right"
+
+    async def _encode_background(self, src: str) -> tuple[str, bool] | None:
+        """把背景图转成 data URI，并判断面板区域是否需要反色文字。
+
+        data URI 可以避免跨域图片污染 canvas，LiquidGlass 才能正常采样；
+        顺带用 Pillow 量出面板落点附近的亮度，决定文字用墨色还是白色。
+
+        Args:
+            src: http(s) 链接、file:// URI 或本地路径。
+
+        Returns:
+            ``(data URI, 面板区域是否偏暗)``；失败时返回 None。
+        """
+        if src.startswith("data:"):
+            return src, False
+
+        fetched = await self._fetch_image(src)
+        if not fetched:
+            return None
+        raw, cache_key = fetched
 
         cached = self._bg_cache.get(cache_key)
         if cached:
             return cached
 
-        data_uri = await asyncio.to_thread(self._encode_image, raw)
-        if data_uri:
-            if len(self._bg_cache) >= 8:
-                self._bg_cache.clear()
-            self._bg_cache[cache_key] = data_uri
-        return data_uri
+        encoded = await asyncio.to_thread(self._encode_image, raw, self._side())
+        if not encoded:
+            return None
+        if len(self._bg_cache) >= 8:
+            self._bg_cache.clear()
+        self._bg_cache[cache_key] = encoded
+        return encoded
 
     @staticmethod
-    def _encode_image(raw: bytes) -> str | None:
-        """压缩并编码背景图，控制发给渲染服务的数据量。
+    def _encode_image(raw: bytes, side: str = "right") -> tuple[str, bool] | None:
+        """压缩并编码背景图，同时判断面板将要落的那块区域够不够亮。
+
+        卡片面板上的文字是固定色，所以必须先知道底图的明暗：淡彩水彩上用深墨字，
+        深色夜空上就得换成白字，否则会出现"深蓝字压在深蓝玻璃上"。
 
         Args:
             raw: 原始图片字节。
+            side: 文字面板所在的一侧，``left`` 或 ``right``。
 
         Returns:
-            JPEG 的 data URI；无法解码时返回 None。
+            ``(JPEG 的 data URI, 面板区域是否偏暗)``；无法解码时返回 None。
         """
         try:
             with PILImage.open(io.BytesIO(raw)) as img:
                 img = img.convert("RGB")
                 img.thumbnail((1600, 2400), PILImage.Resampling.LANCZOS)
+
+                # 面板约占宽度的 44%~96%，垂直居中。取这块区域估算亮度。
+                width, height = img.size
+                left = 0.44 if side == "right" else 0.04
+                right = 0.96 if side == "right" else 0.56
+                box = (
+                    int(width * left),
+                    int(height * 0.18),
+                    max(int(width * right), int(width * left) + 1),
+                    max(int(height * 0.82), int(height * 0.18) + 1),
+                )
+                grey = img.crop(box).resize((32, 32), PILImage.Resampling.BILINEAR).convert("L")
+                luma = sum(grey.getdata()) / 1024 / 255
+
                 buffer = io.BytesIO()
                 img.save(buffer, format="JPEG", quality=88, optimize=True)
                 encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
-                return f"data:image/jpeg;base64,{encoded}"
+                # 阈值按淡彩水彩与夜空插画的分界取：实测浅色图 luma 0.47 以上，
+                # 唯一的暗色图是 0.32。玻璃本身还会提亮，所以只在明显偏暗时才加厚。
+                return f"data:image/jpeg;base64,{encoded}", luma < 0.45
+        except Exception:
+            return None
+
+    @staticmethod
+    def _encode_sign(raw: bytes, width: int = 420) -> str | None:
+        """把落款线稿裁到有效像素并缩成小 PNG，保留透明背景。
+
+        用户提供的线稿是一张大片留白的透明画布，直接塞进卡片会带着周围的空白。
+        这里按 alpha 通道裁出实际笔触，再等比缩到 ``width`` 宽。
+
+        Args:
+            raw: 原始 PNG 字节。
+            width: 输出宽度（像素）。
+
+        Returns:
+            PNG 的 data URI；无法解码或全透明时返回 None。
+        """
+        try:
+            with PILImage.open(io.BytesIO(raw)) as img:
+                img = img.convert("RGBA")
+                bbox = img.getchannel("A").getbbox()
+                if bbox:
+                    img = img.crop(bbox)
+                if img.width <= 0 or img.height <= 0:
+                    return None
+                height = max(1, round(img.height * width / img.width))
+                img = img.resize((width, height), PILImage.Resampling.LANCZOS)
+                buffer = io.BytesIO()
+                img.save(buffer, format="PNG", optimize=True)
+                encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+                return f"data:image/png;base64,{encoded}"
         except Exception:
             return None
 
     async def _resolve_background(self) -> dict:
-        """解析底部背景图，未配置时退回内置渐变背景。
+        """解析底部背景图：用户配置的图 → 内置默认插画 → 渐变兜底。
 
         Returns:
-            ``{"is_image": bool, "src": str, "css": str}``。
-            ``css`` 供模板里 CSS 毛玻璃兜底层复用同一张底图。
+            ``{"is_image": bool, "src": str, "css": str, "is_dark": bool}``。
+            ``is_dark`` 表示面板区域的底图明显偏暗，玻璃需要加厚。
         """
-        gradient = {"is_image": False, "src": "", "css": "var(--aurora)"}
+        gradient = {"is_image": False, "src": "", "css": "var(--sky)", "is_dark": False}
         uploaded = self.render_cfg.get("background_file")
         if isinstance(uploaded, str):
             candidates = [uploaded]
@@ -291,18 +366,57 @@ class AzureSignInPlugin(Star):
         if fallback_url:
             candidates.append(fallback_url)
 
+        # 都没配就走内置底图，让插件装好即有天依的观感。
+        if not any(src.strip() for src in candidates):
+            candidates.append(str(DEFAULT_BACKGROUND_PATH))
+
         for src in candidates:
             src = src.strip()
             if not src:
                 continue
-            data_uri = await self._to_data_uri(src)
-            if data_uri:
-                return {"is_image": True, "src": data_uri, "css": f'url("{data_uri}")'}
+            encoded = await self._encode_background(src)
+            if encoded:
+                data_uri, is_dark = encoded
+                return {
+                    "is_image": True,
+                    "src": data_uri,
+                    "css": f'url("{data_uri}")',
+                    "is_dark": is_dark,
+                }
             if src.startswith(("http://", "https://")):
                 # 下载失败时至少把原始链接交出去，渲染端若可直连仍能显示。
                 self.logger.warning(f"背景图预下载失败，改用原始链接：{src}")
-                return {"is_image": True, "src": src, "css": f'url("{src}")'}
+                return {"is_image": True, "src": src, "css": f'url("{src}")', "is_dark": False}
         return gradient
+
+    async def _resolve_sign(self) -> str:
+        """解析落款线稿：优先用配置里上传的图，否则用插件内置的手绘线稿。
+
+        Returns:
+            可直接放进 ``<img src>`` 的 PNG data URI；不可用时返回空字符串。
+        """
+        if self._sign_cache is not None:
+            return self._sign_cache
+
+        uploaded = self.render_cfg.get("signature_file")
+        if isinstance(uploaded, str) and uploaded.strip():
+            fetched = await self._fetch_image(uploaded.strip())
+            if fetched:
+                encoded = await asyncio.to_thread(self._encode_sign, fetched[0])
+                if encoded:
+                    self._sign_cache = encoded
+                    return encoded
+
+        try:
+            raw = SIGNATURE_PATH.read_bytes()
+        except OSError as exc:
+            self.logger.warning(f"读取内置落款线稿失败：{exc}")
+            self._sign_cache = ""
+            return ""
+
+        data_uri = await asyncio.to_thread(self._encode_sign, raw)
+        self._sign_cache = data_uri or ""
+        return self._sign_cache
 
     def _glass_json(self, has_image: bool) -> str:
         """生成注入到卡片脚本里的 LiquidGlass 配置。
@@ -311,24 +425,24 @@ class AzureSignInPlugin(Star):
             has_image: 本次是否使用真实背景图。LiquidGlass 只能采样同级的 ``<img>``，
                 纯渐变背景会渲染成一块发白的面板，因此这种情况交给 CSS 毛玻璃。
 
-        默认值是"能压住花哨底图"的一档：模糊偏高、整体压暗、略降饱和，
-        保证白字在照片上依然清晰；想要更通透可以自行调小。
+        默认值偏"磨砂"：模糊高、略微提亮、轻降饱和。玻璃渲染的是折射后的底图，
+        本身是透明的，真正托住文字的是模板里的白雾层；这里只负责玻璃的质感。
         """
         options = {
-            "blurAmount": self._float(self.render_cfg, "glass_blur", 0.55, 0.0, 1.0),
-            "refraction": self._float(self.render_cfg, "glass_refraction", 0.62, 0.0, 1.5),
+            "blurAmount": self._float(self.render_cfg, "glass_blur", 0.72, 0.0, 1.0),
+            "refraction": self._float(self.render_cfg, "glass_refraction", 0.42, 0.0, 1.5),
             "chromAberration": 0.05,
             "edgeHighlight": 0.09,
             "specular": 0.40,
             "fresnel": 0.95,
             "distortion": 0.02,
-            "cornerRadius": self._int(self.render_cfg, "glass_radius", 52, 0, 200),
+            "cornerRadius": self._int(self.render_cfg, "glass_radius", 46, 0, 200),
             "zRadius": 36,
             "opacity": 1.0,
-            "saturation": self._float(self.render_cfg, "glass_saturation", -0.30, -1.0, 1.0),
-            "tintStrength": self._float(self.render_cfg, "glass_tint", 0.42, 0.0, 1.0),
-            "brightness": self._float(self.render_cfg, "glass_brightness", -0.28, -0.6, 0.4),
-            "shadowOpacity": self._float(self.render_cfg, "glass_shadow", 0.34, 0.0, 1.0),
+            "saturation": self._float(self.render_cfg, "glass_saturation", -0.10, -1.0, 1.0),
+            "tintStrength": self._float(self.render_cfg, "glass_tint", 0.18, 0.0, 1.0),
+            "brightness": self._float(self.render_cfg, "glass_brightness", 0.16, -0.6, 0.4),
+            "shadowOpacity": self._float(self.render_cfg, "glass_shadow", 0.20, 0.0, 1.0),
             "shadowSpread": 18,
             "shadowOffsetY": 6,
             "floating": False,
@@ -343,6 +457,7 @@ class AzureSignInPlugin(Star):
             "options": options,
         }
         return json.dumps(payload, ensure_ascii=False)
+
     async def _render_card(self, event: AstrMessageEvent, text: dict) -> str | None:
         """渲染打卡卡片并裁切到配置尺寸。
 
@@ -358,20 +473,28 @@ class AzureSignInPlugin(Star):
 
         width = self._int(self.render_cfg, "card_width", 1000, 480, 2400)
         height = self._int(self.render_cfg, "card_height", 1400, 640, 3200)
-        side = "left" if str(self.render_cfg.get("text_side", "right")).lower() == "left" else "right"
+        side = self._side()
         image_format = str(self.render_cfg.get("image_format", "jpeg")).lower()
         if image_format not in {"jpeg", "png"}:
             image_format = "jpeg"
 
         background = await self._resolve_background()
+        # 横版插画塞进竖版卡片时会被 cover 裁掉两侧，把主体让到没有文字的一侧。
+        bg_position = self.render_cfg.get("background_position")
+        if not isinstance(bg_position, str) or not bg_position.strip():
+            bg_position = "72% center" if side == "right" else "28% center"
+
         data = {
             "card_w": width,
             "card_h": height,
             "scale": round(width / 1000, 4),
             "side": side,
             "bg": background,
+            "bg_position": bg_position.strip(),
+            "is_dark": background["is_dark"],
             "scrim_opacity": self._float(self.render_cfg, "scrim_opacity", 0.55, 0.0, 1.0),
             "glass_json": self._glass_json(background["is_image"]),
+            "sign_src": await self._resolve_sign(),
             "text": text,
         }
 
