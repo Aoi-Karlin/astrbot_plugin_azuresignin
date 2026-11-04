@@ -7,7 +7,13 @@
         "description": "底部背景图（可上传多张，随机使用一张）",
         "type": "file",
         "default": [],
-        "file_types": ["jpg", "jpeg", "png", "webp", "bmp"],
+        "file_types": [
+          "jpg",
+          "jpeg",
+          "png",
+          "webp",
+          "bmp"
+        ],
         "obvious_hint": true,
         "hint": "卡片的底图。留空时使用 background_url，再留空则使用内置渐变背景。图片会被压缩后内嵌进渲染页面。"
       },
@@ -27,43 +33,73 @@
         "description": "文案位置",
         "type": "string",
         "default": "right",
-        "options": ["left", "right"],
-        "labels": ["左侧", "右侧"],
-        "subtitles": ["文字面板靠左，右侧露出底图", "文字面板靠右，左侧露出底图"]
+        "options": [
+          "left",
+          "right"
+        ],
+        "labels": [
+          "左侧",
+          "右侧"
+        ],
+        "subtitles": [
+          "文字面板靠左，右侧露出底图",
+          "文字面板靠右，左侧露出底图"
+        ]
       },
       "card_width": {
         "description": "卡片宽度",
         "type": "int",
         "default": 1000,
-        "slider": { "min": 480, "max": 2000, "step": 20 },
+        "slider": {
+          "min": 480,
+          "max": 2000,
+          "step": 20
+        },
         "hint": "导出图片的宽度（像素）。版面按宽度等比缩放。"
       },
       "card_height": {
         "description": "卡片高度",
         "type": "int",
         "default": 1400,
-        "slider": { "min": 640, "max": 2800, "step": 20 },
+        "slider": {
+          "min": 640,
+          "max": 2800,
+          "step": 20
+        },
         "hint": "导出图片的高度（像素）。"
       },
       "image_format": {
         "description": "输出格式",
         "type": "string",
         "default": "jpeg",
-        "options": ["jpeg", "png"],
-        "labels": ["JPEG（体积小）", "PNG（无损）"]
+        "options": [
+          "jpeg",
+          "png"
+        ],
+        "labels": [
+          "JPEG（体积小）",
+          "PNG（无损）"
+        ]
       },
       "scrim_opacity": {
         "description": "文字一侧柔光强度",
         "type": "float",
         "default": 0.55,
-        "slider": { "min": 0, "max": 1, "step": 0.05 },
+        "slider": {
+          "min": 0,
+          "max": 1,
+          "step": 0.05
+        },
         "hint": "往文字一侧压一层淡白柔光，让面板外的画面退后，避免和文字抢注意力。"
       },
       "signature_file": {
         "description": "落款线稿",
         "type": "file",
-        "default": "",
-        "file_types": ["png", "webp"],
+        "default": [],
+        "file_types": [
+          "png",
+          "webp"
+        ],
         "hint": "卡片右下角的小图，默认使用插件内置的洛天依线稿（assets/signature.png）。上传自己的图可替换，建议用透明背景 PNG。"
       },
       "kicker_text": {
@@ -92,45 +128,73 @@
         "description": "玻璃模糊",
         "type": "float",
         "default": 0.72,
-        "slider": { "min": 0, "max": 1, "step": 0.01 },
+        "slider": {
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
         "hint": "调大面板更朦胧、文字更清晰；调小能看到更明显的折射线条。"
       },
       "glass_refraction": {
         "description": "玻璃折射",
         "type": "float",
         "default": 0.42,
-        "slider": { "min": 0, "max": 1.5, "step": 0.01 }
+        "slider": {
+          "min": 0,
+          "max": 1.5,
+          "step": 0.01
+        }
       },
       "glass_tint": {
         "description": "玻璃冷色调",
         "type": "float",
         "default": 0.18,
-        "slider": { "min": 0, "max": 1, "step": 0.01 }
+        "slider": {
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        }
       },
       "glass_brightness": {
         "description": "玻璃亮度",
         "type": "float",
         "default": 0.16,
-        "slider": { "min": -0.6, "max": 0.6, "step": 0.01 },
+        "slider": {
+          "min": -0.6,
+          "max": 0.6,
+          "step": 0.01
+        },
         "hint": "浅色卡片建议取正值，让玻璃提亮、深色文字更清楚。"
       },
       "glass_saturation": {
         "description": "玻璃饱和度",
         "type": "float",
-        "default": -0.10,
-        "slider": { "min": -1, "max": 1, "step": 0.01 }
+        "default": -0.1,
+        "slider": {
+          "min": -1,
+          "max": 1,
+          "step": 0.01
+        }
       },
       "glass_radius": {
         "description": "玻璃圆角",
         "type": "int",
         "default": 46,
-        "slider": { "min": 0, "max": 160, "step": 2 }
+        "slider": {
+          "min": 0,
+          "max": 160,
+          "step": 2
+        }
       },
       "glass_shadow": {
         "description": "玻璃投影强度",
         "type": "float",
-        "default": 0.20,
-        "slider": { "min": 0, "max": 1, "step": 0.01 }
+        "default": 0.2,
+        "slider": {
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        }
       }
     }
   },
@@ -142,33 +206,53 @@
         "description": "每次打卡基础积分",
         "type": "int",
         "default": 10,
-        "slider": { "min": 0, "max": 1000, "step": 1 }
+        "slider": {
+          "min": 0,
+          "max": 1000,
+          "step": 1
+        }
       },
       "streak_bonus": {
         "description": "连续打卡每日额外积分",
         "type": "int",
         "default": 2,
-        "slider": { "min": 0, "max": 100, "step": 1 },
+        "slider": {
+          "min": 0,
+          "max": 100,
+          "step": 1
+        },
         "hint": "连续第 N 天额外获得 streak_bonus × min(N-1, max_streak_bonus) 分。"
       },
       "max_streak_bonus": {
         "description": "连续加成上限天数",
         "type": "int",
         "default": 5,
-        "slider": { "min": 0, "max": 365, "step": 1 }
+        "slider": {
+          "min": 0,
+          "max": 365,
+          "step": 1
+        }
       },
       "reset_hour": {
         "description": "每日重置时间（0-23 点）",
         "type": "int",
         "default": 0,
-        "slider": { "min": 0, "max": 23, "step": 1 },
+        "slider": {
+          "min": 0,
+          "max": 23,
+          "step": 1
+        },
         "hint": "设为 4 则凌晨 4 点前打卡仍算前一天，方便熬夜的人。"
       },
       "leaderboard_size": {
         "description": "排行榜显示人数",
         "type": "int",
         "default": 10,
-        "slider": { "min": 1, "max": 50, "step": 1 }
+        "slider": {
+          "min": 1,
+          "max": 50,
+          "step": 1
+        }
       }
     }
   }

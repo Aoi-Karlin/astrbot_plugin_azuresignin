@@ -50,7 +50,7 @@ RENDER_DEFAULTS = {
     "glass_saturation": -0.10,
     "glass_radius": 46,
     "glass_shadow": 0.20,
-    "signature_file": "",
+    "signature_file": [],
     "kicker_text": "DAILY CHECK-IN",
     "footer_text": "愿每一次坚持，都被看见。",
 }
@@ -399,8 +399,18 @@ class AzureSignInPlugin(Star):
             return self._sign_cache
 
         uploaded = self.render_cfg.get("signature_file")
-        if isinstance(uploaded, str) and uploaded.strip():
-            fetched = await self._fetch_image(uploaded.strip())
+        if isinstance(uploaded, str):
+            candidates = [uploaded]
+        elif isinstance(uploaded, list):
+            candidates = [item for item in uploaded if isinstance(item, str)]
+        else:
+            candidates = []
+
+        for src in candidates:
+            src = src.strip()
+            if not src:
+                continue
+            fetched = await self._fetch_image(src)
             if fetched:
                 encoded = await asyncio.to_thread(self._encode_sign, fetched[0])
                 if encoded:
