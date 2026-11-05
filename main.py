@@ -172,6 +172,9 @@ class HtmlRenderer:
 
 
 PLUGIN_NAME = "astrbot_plugin_azuresignin"
+
+#: 同一条消息可能同时命中 command 和 regex，用这个标记保证只打卡一次。
+HANDLED_KEY = "azuresignin_handled"
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "signin_card.html"
 SIGNATURE_PATH = Path(__file__).parent / "assets" / "signature.png"
 DEFAULT_BACKGROUND_PATH = Path(__file__).parent / "assets" / "default_bg.jpg"
@@ -297,6 +300,30 @@ class AzureSignInPlugin(Star):
         """
         reset_hour = self._int(self.signin_cfg, "reset_hour", 0, 0, 23)
         return (datetime.now() - timedelta(hours=reset_hour)).date()
+
+    @staticmethod
+    def _uid(event: AstrMessageEvent) -> str:
+        """取发送者 ID。
+
+        ``AstrMessageEvent.get_sender_id()`` 在 ``sender.user_id`` 不是字符串
+        时会直接返回空串（见 astr_message_event.py 的实现），那样所有用户会
+        落进同一个空 key，积分和记录就会被"共用"。这里再兜一层原始字段。
+
+        Args:
+            event: 消息事件。
+
+        Returns:
+            发送者 ID；确实取不到时返回空字符串。
+        """
+        uid = event.get_sender_id()
+        if uid:
+            return str(uid)
+        sender = getattr(event.message_obj, "sender", None)
+        for attr in ("user_id", "id", "uin"):
+            value = getattr(sender, attr, None)
+            if value not in (None, ""):
+                return str(value)
+        return ""
 
     async def _load_record(self, uid: str) -> dict:
         """读取并规整某个用户的打卡记录。
@@ -605,7 +632,7 @@ class AzureSignInPlugin(Star):
     async def _build_text(self, event: AstrMessageEvent, record: dict, signed: bool, gained: int) -> dict:
         """组装卡片上的文案。"""
         today = self._sign_day()
-        rank, total_users = await self._rank_of(event.get_sender_id())
+        rank, total_users = await self._rank_of(self._uid(event))
         return {
             "kicker": str(self.render_cfg.get("kicker_text") or "DAILY CHECK-IN"),
             "date": f"{today.year}.{today.month:02d}.{today.day:02d}",
@@ -635,7 +662,17 @@ class AzureSignInPlugin(Star):
     @filter.command("打卡", alias={"签到"})
     async def sign_in(self, event: AstrMessageEvent):
         """每日打卡，生成玻璃质感打卡卡片"""
-        uid = event.get_sender_id()
+        # ``filter.command`` 与 ``filter.regex`` 可能同时命中同一条消息
+        # （私聊会自动唤醒），这里用事件级标记保证只处理一次。
+        if event.get_extra(HANDLED_KEY):
+            return
+        event.set_extra(HANDLED_KEY, True)
+
+        uid = self._uid(event)
+        if not uid:
+            self.logger.error("无法获取发送者 ID，可能是适配器未提供 sender。")
+            yield event.plain_result("取不到你的账号 ID，无法记录打卡。请把这条报错发给管理员。")
+            return
         name = event.get_sender_name()
         try:
             record, signed, gained = await self._sign_in(uid, name)
@@ -662,12 +699,9 @@ class AzureSignInPlugin(Star):
 
         AstrBot 的 ``filter.command`` 要求消息先被唤醒（前缀或 @），
         而 ``filter.regex`` 不受此限制，所以用它兜住"裸"签到。
-        带前缀 / @ / 私聊时两个过滤器会同时命中，这里交还给指令处理器，
-        避免同一条消息触发两次打卡。
+        带前缀 / @ / 私聊时两个过滤器会同时命中，去重交给 ``sign_in``
+        里的事件标记，这里的实现保持和指令入口完全一致。
         """
-        if event.is_at_or_wake_command:
-            return
-
         async for result in self.sign_in(event):
             yield result
 
@@ -677,7 +711,7 @@ class AzureSignInPlugin(Star):
         board = await self._load_board()
         rows = self._board_sorted(board)
         if not rows:
-            yield event.plain_result("还没有人打卡，快去发送 /打卡 抢第一吧！")
+            yield event.plain_result("还没有人打卡，快去发一条打卡指令抢第一吧！")
             return
 
         size = self._int(self.signin_cfg, "leaderboard_size", 10, 1, 50)
@@ -693,12 +727,12 @@ class AzureSignInPlugin(Star):
     @filter.command("打卡记录", alias={"签到记录", "我的打卡"})
     async def my_record(self, event: AstrMessageEvent):
         """查看自己的打卡记录"""
-        record = await self._load_record(event.get_sender_id())
+        record = await self._load_record(self._uid(event))
         if record["total_days"] <= 0:
-            yield event.plain_result("你还没有打卡记录，发送 /打卡 开始第一天吧！")
+            yield event.plain_result("你还没有打卡记录，发一条打卡指令开始第一天吧！")
             return
 
-        rank, total_users = await self._rank_of(event.get_sender_id())
+        rank, total_users = await self._rank_of(self._uid(event))
         yield event.plain_result(
             f"📅 累计签到：{record['total_days']} 天\n"
             f"🔥 当前连续：{record['streak']} 天（最长 {record['best']} 天）\n"
